@@ -7,7 +7,11 @@ for Architecture-Neutral Dynamic Analysis. Plugins are an easy way to extend the
 
 If all you want to do is use plugins others have written, you can read this section and skip the rest.
 
-There are two ways to load a PANDA plugin: by specifying it via `-panda-plugin` on the QEMU command line, or by using the `load_plugin` command from the monitor. In either case, the plugin should be specified by giving the path to the plugin (which will usually be named `panda_{something}.so`).
+There are two ways to load a PANDA plugin: by specifying it via `-panda` or `-panda-plugin` on the QEMU command line, or by using the `load_plugin` command from the monitor. If using `-panda-plugin` or `load_plugin`, the plugin should be specified by giving the path to the plugin (which will usually be named `panda_{something}.so`).
+
+If using `-panda`, specify just the plugin's name. PANDA will search for the plugin in either the QEMU directory or in PANDA_PLUGIN_DIR. You can specify multiple plugins as a semicolon-separated list, and you can give the plugins arguments as a comma-separated list after the plugin's name and a colon. For example,
+
+	-panda stringsearch;callstack_instr;llvm_trace:base=dir
 
 Once a plugin is loaded, it will appear when using the `list_plugins` monitor command:
 
@@ -97,6 +101,29 @@ This can be used to allow one plugin to call functions another, since the handle
 	bool   panda_load_plugin(const char *filename);
 
 Load a PANDA plugin. The `filename` parameter is currently interpreted as a simple filename; no searching is done (this may change in the future). This can be used to allow one plugin to load another.
+
+### Argument handling
+
+PANDA allows plugins to receive options on the command line. Each option should look like `-panda-arg <plugin_name>:<key>=<value>`.
+
+    typedef struct panda_arg {
+        char *argptr;   // For internal use only
+        char *key;      // Pointer to the key string
+        char *value;    // Pointer to the value string
+    } panda_arg;
+
+    typedef struct panda_arg_list {
+        int nargs;
+        panda_arg *list;
+    } panda_arg_list;
+
+    panda_arg_list *panda_get_args(const char *plugin_name);
+
+Retrieves a list of just the PANDA arguments that match `plugin_name`. The arguments are returned in a `panda_arg_list` structure, where the `nargs` member gives the length of the `list` of individual `panda_arg` structures. Each `panda_arg` has a `key`/`value` pair. Note that calling `panda_get_args` allocates memory to store the list, which should be freed after use with `panda_free_args`.
+
+    void panda_free_args(panda_arg_list *args);
+
+Frees an argument list created with `panda_get_args`.
 
 ### Runtime QEMU Control
 
@@ -569,7 +596,80 @@ arguments, be sure to process them in similar ways.
                               arg3, abi_long arg4, abi_long arg5, abi_long arg6,
                               abi_long arg7, abi_long arg8, void *p,
                               abi_long ret);
+---
 
+**replay_hd_transfer**: Called during a replay of a hard drive transfer action
+
+**Callback ID**: PANDA_CB_REPLAY_HD_TRANSFER 
+ 
+**Arguments**:
+
+* `CPUState* env`: pointer to CPUState
+* `uint32_t type`: type of transfer (Hd_transfer_type)
+* `uint64_t src_addr`: address for src
+* `uint64_t dest_addr`: address for dest
+* `uint32_t num_bytes`: size of transfer in bytes
+      
+**Return value**: unused
+
+**Notes**:
+In replay only, some kind of data transfer involving hard drive.  NB: We are
+neither before nor after, really.  In replay the transfer doesn't really happen.
+We are *at* the point at which it happened, really.  Even though the transfer
+doesn't happen in replay, useful instrumentations (such as taint analysis) can
+still be applied accurately.
+
+**Signature**:
+
+    int (*replay_hd_transfer)(CPUState *env, uint32_t type, uint64_t src_addr,
+                              uint64_t dest_addr, uint32_t num_bytes);
+---
+
+**replay_before_cpu_physical_mem_rw_ram**: In replay only, we are about to dma
+from some qemu buffer to guest memory
+
+**Callback ID**: PANDA_CB_REPLAY_BEFORE_CPU_PHYSICAL_MEM_RW_RAM
+
+**Arguments**:
+
+* `CPUState* env`: pointer to CPUState                   
+* `uint32_t is_write`: type of transfer going on (is_write == 1 means IO -> RAM else RAM -> IO)
+* `uint64_t src_addr`: src of dma
+* `uint64_t dest_addr`: dest of dma
+* `uint32_t num_bytes`: size of transfer
+
+**Return value**: unused
+
+**Notes**:
+In the current version of QEMU, this appears to be a less commonly used method
+of performing DMA with the hard drive device.  For the hard drive, the most
+common DMA mechanism can be seen in the PANDA_CB_REPLAY_HD_TRANSFER_TYPE under
+type HD_TRANSFER_HD_TO_RAM (and vice versa).  Other devices still appear to use
+cpu_physical_memory_rw() though.
+
+**Signature**:
+
+    int (*replay_before_cpu_physical_mem_rw_ram)(
+            CPUState *env, uint32_t is_write, uint64_t src_addr, uint64_t dest_addr,
+            uint32_t num_bytes);
+---
+
+**replay_handle_packet**: TODO: This will be used for network packet replay.
+
+**Callback ID**:   PANDA_CB_REPLAY_HANDLE_PACKET
+
+**Arguments**:
+
+* `CPUState *env`: pointer to CPUState
+* `uint8_t *buf`: buffer containing packet data
+* `int size`: num bytes in buffer
+* `uint8_t direction`: XXX read or write.  not sure which is which.
+* `uint64_t old_buf_addr`: XXX this is a mystery
+
+**Signature**:
+
+    int (*replay_handle_packet)(CPUState *env, uint8_t *buf, int size,
+                                uint8_t direction, uint64_t old_buf_addr);
 ---
 
 ## Sample Plugin: Syscall Monitor
@@ -695,7 +795,7 @@ Finally, you can run QEMU with the plugin enabled:
 ```
 x86_64-softmmu/qemu-system-x86_64 -m 1024 -vnc :0 -monitor stdio \
 	-hda /scratch/qcows/qcows/win7.1.qcow2 -loadvm booted -k en-us \
-	-panda-plugin x86_64-softmmu/panda_syscalls.so
+	-panda syscalls
 ```
 
 When run on a Windows 7 VM, this plugin produces output in `syscalls.txt` that looks like:

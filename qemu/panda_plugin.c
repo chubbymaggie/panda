@@ -55,6 +55,7 @@ bool panda_add_arg(const char *arg, int arglen) {
 }
 
 bool panda_load_plugin(const char *filename) {
+  printf ("loading %s\n", filename);
     void *plugin = dlopen(filename, RTLD_NOW);
     if(!plugin) {
         fprintf(stderr, "Failed to load %s: %s\n", filename, dlerror());
@@ -70,10 +71,12 @@ bool panda_load_plugin(const char *filename) {
         panda_plugins[nb_panda_plugins].plugin = plugin;
         strncpy(panda_plugins[nb_panda_plugins].name, basename(filename), 256);
         nb_panda_plugins++;
+	fprintf (stderr, "Success\n");
         return true;
     }
     else {
         dlclose(plugin);
+	fprintf (stderr, "Fail. init_fn returned 0\n");
         return false;
     }
 }
@@ -247,6 +250,79 @@ void panda_memsavep(FILE *f) {
         }
     }
 #endif
+}
+
+// Parse out arguments and return them to caller
+panda_arg_list *panda_get_args(const char *plugin_name) {
+    panda_arg_list *ret = NULL;
+    panda_arg *list = NULL;
+
+    ret = g_new0(panda_arg_list, 1);
+    if (ret == NULL) goto fail;
+
+    int i;
+    int nargs = 0;
+    // one pass to get number of matching args
+    for (i = 0; i < panda_argc; i++) {
+        if (0 == strncmp(plugin_name, panda_argv[i], strlen(plugin_name))) {
+            nargs++;
+        }
+    }
+
+    if (nargs == 0) goto fail;
+
+    ret->nargs = nargs;
+    list = (panda_arg *) g_malloc(sizeof(panda_arg)*nargs);
+    if (list == NULL) goto fail;
+
+    // second pass to copy and parse each arg into key/value
+    int ret_idx = 0;
+    for (i = 0; i < panda_argc; i++) {
+        if (0 == strncmp(plugin_name, panda_argv[i], strlen(plugin_name))) {
+            list[ret_idx].argptr = g_strdup(panda_argv[i]);
+            bool found_colon = false;
+            bool found_equals = false;
+            char *p;
+            int j;
+            for (p = list[ret_idx].argptr, j = 0;
+                    *p != '\0' && j < 256; p++, j++) {
+                if (*p == ':') {
+                    *p = '\0';
+                    list[ret_idx].key = p+1;
+                    found_colon = true;
+                }
+                else if (*p == '=') {
+                    *p = '\0';
+                    list[ret_idx].value = p+1;
+                    found_equals = true;
+                    break;
+                }
+            }
+            if (! (found_colon && found_equals)) {
+                // malformed argument
+                goto fail;
+            }
+            ret_idx++;
+        }
+    }
+
+    ret->list = list;
+
+    return ret;
+
+fail:
+    if (ret != NULL) g_free(ret);
+    if (list != NULL) g_free(list);
+    return NULL;
+}
+
+// Free a list of parsed arguments
+void panda_free_args(panda_arg_list *args) {
+    int i;
+    for (i = 0; i < args->nargs; i++) {
+        g_free(args->list[i].argptr);
+    }
+    g_free(args);
 }
 
 #ifdef CONFIG_SOFTMMU

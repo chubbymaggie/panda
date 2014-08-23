@@ -24,22 +24,6 @@ volatile sig_atomic_t rr_skipped_callsite_location = 0;
 
 volatile sig_atomic_t rr_use_live_exit_request = 0;
 
-// a program-point indexed record/replay log
-typedef enum {RECORD, REPLAY} RR_log_type;
-typedef struct RR_log_t {
-  //mz TODO this field seems redundant given existence of rr_mode
-  RR_log_type type;            // record or replay
-  RR_prog_point last_prog_point; // to report progress
-
-  char *name;                  // file name
-  FILE *fp;                    // file pointer for log
-  unsigned long long size;     // for a log being opened for read, this will be the size in bytes
-
-  RR_log_entry current_item;
-  uint8_t current_item_valid;
-  unsigned long long item_number;
-} RR_log;
-
 //mz the log of non-deterministic events
 RR_log *rr_nondet_log = NULL;
 
@@ -108,6 +92,14 @@ static void rr_spit_log_entry(RR_log_entry item) {
                         break;
                     case RR_CALL_CPU_MEM_UNMAP:
                         callbytes = sizeof(args->variant.cpu_mem_unmap) + args->variant.cpu_mem_unmap.len;
+                        break;
+                    case RR_CALL_HD_TRANSFER:
+                        callbytes = sizeof(args->variant.hd_transfer_args);
+                        printf("This is a HD transfer. Source: 0x%lx, Dest: 0x%lx, Len: %d\n",
+                            args->variant.hd_transfer_args.src_addr,
+                            args->variant.hd_transfer_args.dest_addr,
+                            args->variant.hd_transfer_args.num_bytes);
+
                         break;
                 }
                 printf("\tRR_SKIPPED_CALL_(%s) from %s %d bytes\n", 
@@ -237,6 +229,20 @@ static RR_log_entry *rr_read_item(void) {
                     case RR_CALL_CPU_REG_MEM_REGION:
                         assert(fread(&(args->variant.cpu_mem_reg_region_args), 
                               sizeof(args->variant.cpu_mem_reg_region_args), 1, rr_nondet_log->fp) == 1);
+                        break;
+                    case RR_CALL_HD_TRANSFER:
+                        assert(fread(&(args->variant.hd_transfer_args),
+                              sizeof(args->variant.hd_transfer_args), 1, rr_nondet_log->fp) == 1);
+                        break;
+                    case RR_CALL_HANDLE_PACKET:
+                        assert(fread(&(args->variant.handle_packet_args),
+                              sizeof(args->variant.handle_packet_args), 1, rr_nondet_log->fp) == 1);
+                        fseek(rr_nondet_log->fp,
+                            args->variant.handle_packet_args.size, SEEK_CUR);
+                        break;
+                    case RR_CALL_NET_TRANSFER:
+                        assert(fread(&(args->variant.net_transfer_args),
+                              sizeof(args->variant.net_transfer_args), 1, rr_nondet_log->fp) == 1);
                         break;
                     default:
                         //mz unimplemented
