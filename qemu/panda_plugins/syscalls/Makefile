@@ -13,6 +13,9 @@ include ../panda.mak
 QEMU_CFLAGS+=-std=c++11
 # LIBS+=
 
+# uncomment to enable taint in the FDTRACKER
+#QEMU_CFLAGS+= -DFDTRACKER_ENABLE_TAINT
+
 # The main rule for your plugin. Please stick with the panda_ naming
 # convention.
 $(PLUGIN_TARGET_DIR)/$(PLUGIN_NAME).o: $(PLUGIN_SRC_ROOT)/$(PLUGIN_NAME)/$(PLUGIN_NAME).cpp
@@ -23,8 +26,6 @@ O_FILES=$(PLUGIN_TARGET_DIR)/$(PLUGIN_NAME).o
 ifdef ENABLE_FDTRACKER
 O_FILES+=$(PLUGIN_TARGET_DIR)/fdtracker.o
 endif
-# any syscall handlers have to be linked in prior to the default empty handlers in weak_callbacks
-O_FILES+=$(PLUGIN_TARGET_DIR)/weak_callbacks.o
 
 $(PLUGIN_TARGET_DIR)/panda_$(PLUGIN_NAME).so: $(O_FILES)
 	$(call quiet-command,$(CXX) $(QEMU_CFLAGS) -shared -o $@ $^ $(LIBS),"  PLUGIN  $@")

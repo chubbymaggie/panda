@@ -316,6 +316,51 @@ fail:
     return NULL;
 }
 
+target_ulong panda_parse_ulong(panda_arg_list *args, const char *argname, target_ulong defval) {
+    if (!args) return defval;
+    int i;
+    for (i = 0; i < args->nargs; i++) {
+        if (strcmp(args->list[i].key, argname) == 0) {
+            return strtoul(args->list[i].value, NULL, 0);
+        }
+    }
+    return defval;
+}
+
+uint64_t panda_parse_uint64(panda_arg_list *args, const char *argname, uint64_t defval) {
+    if (!args) return defval;
+    int i;
+    for (i = 0; i < args->nargs; i++) {
+        if (strcmp(args->list[i].key, argname) == 0) {
+            return strtoul(args->list[i].value, NULL, 0);
+        }
+    }
+    return defval;
+}
+
+double panda_parse_double(panda_arg_list *args, const char *argname, double defval) {
+    if (!args) return defval;
+    int i;
+    for (i = 0; i < args->nargs; i++) {
+        if (strcmp(args->list[i].key, argname) == 0) {
+            return strtod(args->list[i].value, NULL);
+        }
+    }
+    return defval;
+}
+
+// Returns pointer to string inside arg list, freed when list is freed.
+const char *panda_parse_string(panda_arg_list *args, const char *argname, const char *defval) {
+    if (!args) return defval;
+    int i;
+    for (i = 0; i < args->nargs; i++) {
+        if (strcmp(args->list[i].key, argname) == 0) {
+            return args->list[i].value;
+        }
+    }
+    return defval;
+}
+
 // Free a list of parsed arguments
 void panda_free_args(panda_arg_list *args) {
     int i;
