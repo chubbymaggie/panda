@@ -52,6 +52,7 @@ extern "C" {
     int taint_enabled(void);
     void taint_label_ram(uint64_t pa, uint32_t l) ;
     uint32_t taint_query_ram(uint64_t pa);
+    uint32_t taint_pick_label(uint64_t pa);
     uint32_t taint_query_reg(int reg_num, int offset);
     void taint_delete_ram(uint64_t pa) ;
     uint32_t taint_occ_ram(void) ;
@@ -62,6 +63,7 @@ extern "C" {
     int taint_taint_state_changed(void);
     void taint_clear_taint_state_read(void);
     int taint_taint_state_read(void);
+    void taint_clear_shadow_memory(void);
 
 }
 
@@ -803,7 +805,18 @@ int user_after_syscall(void *cpu_env, bitmask_transtbl *fcntl_flags_tbl,
 
 // label this phys addr in memory with this label 
 void __taint_label_ram(uint64_t pa, uint32_t l) {
-  tp_label_ram(shadow, pa, l);
+    tp_label_ram(shadow, pa, l);
+}
+
+static int put_int(uint32_t val, void *place) {
+  *(uint32_t *)place = val;
+  return 0;
+}
+
+uint32_t __taint_pick_label(uint64_t pa) {
+  uint32_t result = ~0;
+  tp_ls_ram_iter(shadow, pa, put_int, &result);
+  return result;
 }
 
 // if phys addr pa is untainted, return 0.
@@ -866,7 +879,9 @@ void __taint_clear_taint_state_read(void) {
 int __taint_taint_state_read(void) {
     return shadow->taint_state_read;
 }
-
+void __taint_clear_shadow_memory(void){
+    clear_shadow_memory(&shadow);
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -882,7 +897,11 @@ int taint_enabled(void) {
 }
 
 void taint_label_ram(uint64_t pa, uint32_t l) {
-  __taint_label_ram(pa, l);
+    __taint_label_ram(pa, l);
+}
+
+uint32_t taint_pick_label(uint64_t pa) {
+  return __taint_pick_label(pa);
 }
 
 uint32_t taint_query_ram(uint64_t pa) {
@@ -931,6 +950,9 @@ int taint_taint_state_read(void) {
     return __taint_taint_state_read();
 }
 
+void taint_clear_shadow_memory(void){
+    __taint_clear_shadow_memory();
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -1013,7 +1035,7 @@ bool init_plugin(void *self) {
         taint_query_outgoing_network_traffic);
     printf ("tainted_pointer = %d\n", tainted_pointer);
     
-
+    printf ("compute_is_delete = %d\n", compute_is_delete);
     printf ("done initializing taint plugin\n");
 
     return true;
