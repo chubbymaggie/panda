@@ -2,14 +2,15 @@
 
 # Set your plugin name here. It does not have to correspond to the name
 # of the directory in which your plugin resides.
-PLUGIN_NAME=network
+PLUGIN_NAME=memstrings
 
 # Include the PANDA Makefile rules
 include ../panda.mak
 
 # If you need custom CFLAGS or LIBS, set them up here
 # CFLAGS+=
-LIBS+=-lpcap
+# LIBS+=
+QEMU_CFLAGS+=-std=c++11
 
 # The main rule for your plugin. Please stick with the panda_ naming
 # convention.
