@@ -31,6 +31,8 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <libgen.h>
@@ -103,8 +105,8 @@ volatile sig_atomic_t rr_replay_requested = 0;
 volatile sig_atomic_t rr_record_requested = 0;
 volatile sig_atomic_t rr_end_record_requested = 0;
 volatile sig_atomic_t rr_end_replay_requested = 0;
-const char * rr_requested_name = NULL;
-const char * rr_snapshot_name  = NULL;
+char * rr_requested_name = NULL;
+char * rr_snapshot_name  = NULL;
 
 //mz FIFO queue of log entries read from the log file
 static RR_log_entry *rr_queue_head;
@@ -820,6 +822,7 @@ static RR_log_entry *rr_read_item(void) {
     return item;
 }
 
+#define RR_MAX_QUEUE_LEN 65536
 
 //mz fill the queue of log entries from the file
 static void rr_fill_queue(void) {
@@ -846,17 +849,18 @@ static void rr_fill_queue(void) {
             // It's not really an interrupt, but needs to be set here so
             // that we can execute any remaining code.
             rr_num_instr_before_next_interrupt = log_entry->header.prog_point.guest_instr_count - rr_prog_point.guest_instr_count;
+            break;
         }
         else if ((log_entry->header.kind == RR_SKIPPED_CALL && log_entry->header.callsite_loc == RR_CALLSITE_MAIN_LOOP_WAIT) ||
                  log_entry->header.kind == RR_INTERRUPT_REQUEST) {
-#if RR_REPORT_PROGRESS
-            static uint64_t num = 1;
-            if ((rr_prog_point.guest_instr_count / (double)rr_nondet_log->last_prog_point.guest_instr_count) * 100 >= num) {
-              replay_progress();
-              num += 1;
-            }
-#endif /* RR_REPORT_PROGRESS */
             rr_num_instr_before_next_interrupt = log_entry->header.prog_point.guest_instr_count - rr_prog_point.guest_instr_count;
+            break;
+        }
+
+        // Cut off queue so we don't run out of memory on long runs of non-interrupts
+        if (num_entries > RR_MAX_QUEUE_LEN) {
+            // No longer know how many instructions it will be until next interrupt, so assume it's (uint64_t) -1
+            rr_num_instr_before_next_interrupt = (uint64_t) -1;
             break;
         }
     }
@@ -864,6 +868,13 @@ static void rr_fill_queue(void) {
     if (num_entries > rr_max_num_queue_entries) {
         rr_max_num_queue_entries = num_entries;
     }
+#if RR_REPORT_PROGRESS
+    static uint64_t num = 1;
+    if ((rr_prog_point.guest_instr_count / (double)rr_nondet_log->last_prog_point.guest_instr_count) * 100 >= num) {
+      replay_progress();
+      num += 1;
+    }
+#endif /* RR_REPORT_PROGRESS */
 }
 
 //mz return next log entry from the queue
@@ -872,8 +883,13 @@ static inline RR_log_entry *get_next_entry(RR_log_entry_kind kind, RR_callsite_i
     RR_log_entry *current;
     //mz make sure queue is not empty, and that we have the right element next
     if (rr_queue_head == NULL) {
-        printf("Queue is empty, will return NULL\n");
-        return NULL;
+        // Try again; we may have failed because the queue got too big and we need to refill
+        rr_fill_queue();
+        // If it's still empty, fail
+        if (rr_queue_head == NULL) {
+            printf("Queue is empty, will return NULL\n");
+            return NULL;
+        }
     }
 
     if (kind != RR_INTERRUPT_REQUEST && kind != RR_SKIPPED_CALL) {
@@ -1146,7 +1162,7 @@ void rr_replay_skipped_calls_internal(RR_callsite_id call_site) {
 		    // run all callbacks registered for hd transfer
 		    RR_hd_transfer_args *hdt = &(args->variant.hd_transfer_args);
 		    panda_cb_list *plist;
-		    for (plist = panda_cbs[PANDA_CB_REPLAY_HD_TRANSFER]; plist != NULL; plist = plist->next) {
+		    for (plist = panda_cbs[PANDA_CB_REPLAY_HD_TRANSFER]; plist != NULL; plist = panda_cb_list_next(plist)) {
 		      plist->entry.replay_hd_transfer
 			(cpu_single_env, 
 			 hdt->type,
@@ -1162,7 +1178,7 @@ void rr_replay_skipped_calls_internal(RR_callsite_id call_site) {
 		    // run all callbacks registered for packet handling
 		    RR_handle_packet_args *hp = &(args->variant.handle_packet_args);
 		    panda_cb_list *plist;
-		    for (plist = panda_cbs[PANDA_CB_REPLAY_HANDLE_PACKET]; plist != NULL; plist = plist->next) {
+		    for (plist = panda_cbs[PANDA_CB_REPLAY_HANDLE_PACKET]; plist != NULL; plist = panda_cb_list_next(plist)) {
 		      plist->entry.replay_handle_packet
 			(cpu_single_env, 
 			 hp->buf,
@@ -1182,7 +1198,7 @@ void rr_replay_skipped_calls_internal(RR_callsite_id call_site) {
                         &(args->variant.net_transfer_args);
                     panda_cb_list *plist;
                     for (plist = panda_cbs[PANDA_CB_REPLAY_NET_TRANSFER];
-                            plist != NULL; plist = plist->next) {
+                            plist != NULL; plist = panda_cb_list_next(plist)) {
                       plist->entry.replay_net_transfer
                         (cpu_single_env, 
                          nta->type,
@@ -1280,6 +1296,8 @@ void rr_destroy_log(void) {
   rr_nondet_log = NULL;
 }
 
+struct timeval replay_start_time;
+
 //mz display a measure of replay progress (using instruction counts and log size)
 void replay_progress(void) {
   if (rr_nondet_log) {
@@ -1287,17 +1305,21 @@ void replay_progress(void) {
       printf ("%s:  log is empty.\n", rr_nondet_log->name);
     }
     else {
-      printf ("%s:  %ld of %llu (%.2f%%) bytes, %llu of %llu (%.2f%%) instructions processed.\n", 
-              rr_nondet_log->name,
-              ftell(rr_nondet_log->fp),
-              rr_nondet_log->size,
-              (ftell(rr_nondet_log->fp) * 100.0) / rr_nondet_log->size,
-              (unsigned long long)rr_queue_head->header.prog_point.guest_instr_count,
-              (unsigned long long)rr_nondet_log->last_prog_point.guest_instr_count,
-              ((rr_queue_head->header.prog_point.guest_instr_count * 100.0) / 
-                    rr_nondet_log->last_prog_point.guest_instr_count)
-      );
-    }
+        struct rusage rusage;
+        getrusage(RUSAGE_SELF, &rusage);
+
+        struct timeval *time = &rusage.ru_utime;
+        float secs = ((float)time->tv_sec*1000000 + (float)time->tv_usec) / 1000000.0;
+        char *name = basename(rr_nondet_log->name);
+        char *dot = strrchr(name, '.');
+        if (dot && dot - name > 10) *(dot - 10) = '\0';
+        printf("%s:  %10lu (%6.2f%%) instrs. %7.2f sec. %5.2f GB ram.\n",
+                name,
+                rr_get_guest_instr_count(),
+                ((rr_get_guest_instr_count() * 100.0) / 
+                 rr_nondet_log->last_prog_point.guest_instr_count),
+                secs, rusage.ru_maxrss / 1024.0 / 1024.0);
+     }
   }
 }
 
@@ -1371,6 +1393,7 @@ void qmp_begin_record_from(const char *snapshot, const char *file_name, Error **
 void qmp_begin_replay(const char *file_name, Error **errp) {
   rr_replay_requested = 1;
   rr_requested_name = g_strdup(file_name);
+  gettimeofday(&replay_start_time, 0);
 }
 
 
@@ -1383,6 +1406,10 @@ void qmp_end_replay(Error **errp) {
   qmp_stop(NULL);
   rr_end_replay_requested = 1;
 }
+
+void panda_end_replay(void) {
+  rr_end_replay_requested = 1;
+}  
 
 #include "qemu-common.h"  // Monitor def
 #include "qdict.h"        // QDict def
@@ -1505,6 +1532,9 @@ void rr_do_end_record(void) {
 #endif
 }
 
+extern void panda_cleanup(void);
+
+
 // file_name_full should be full path to the record/replay log
 int rr_do_begin_replay(const char *file_name_full, void *cpu_state) {
 #ifdef CONFIG_SOFTMMU
@@ -1512,7 +1542,7 @@ int rr_do_begin_replay(const char *file_name_full, void *cpu_state) {
   // decompose file_name_base into path & file. 
   char *rr_path = g_strdup(file_name_full);
   char *rr_name = g_strdup(file_name_full);
-  int snapshot_ret;
+  __attribute__((unused)) int snapshot_ret;
   rr_path = dirname(rr_path);
   rr_name = basename(rr_name);
   if (rr_debug_whisper()) {
@@ -1528,7 +1558,7 @@ int rr_do_begin_replay(const char *file_name_full, void *cpu_state) {
   //  vm_stop(0) RUN_STATE_RESTORE_VM);
     panda_cb_list *plist;
     for(plist = panda_cbs[PANDA_CB_BEFORE_REPLAY_LOADVM]; plist != NULL;
-            plist = plist->next) {
+            plist = panda_cb_list_next(plist)) {
         plist->entry.before_loadvm();
     }
   snapshot_ret = load_vmstate_rr(name_buf);
@@ -1636,6 +1666,7 @@ void rr_do_end_replay(int is_error) {
 
     //mz XXX something more graceful?
     if (is_error) {
+        panda_cleanup();
         abort();
     }
     else {

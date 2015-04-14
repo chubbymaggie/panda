@@ -97,6 +97,8 @@ libobj-y += panda_plugin.o
 libobj-y += panda/panda_memlog.o
 libobj-y += panda/panda_common.o
 libobj-y += panda/tubtf.o
+libobj-y += panda/pandalog.pb-c.o
+libobj-y += panda/pandalog.o
 libobj-y += panda/guestarch.o
 libobj-y += panda/guestarch.o
 #libobj-y += panda/panda_stats.o
@@ -234,7 +236,7 @@ endif #CONFIG_BSD_USER
 # System emulator target
 ifdef CONFIG_SOFTMMU
 
-obj-y = arch_init.o cpus.o monitor.o machine.o gdbstub.o balloon.o ioport.o
+obj-y = arch_init.o cpus.o monitor.o machine.o gdbstub.o balloon.o ioport.o memory-access.o
 # virtio has to be here due to weird dependency between PCI and virtio-net.
 # need to fix this properly
 obj-$(CONFIG_NO_PCI) += pci-stub.o
@@ -245,7 +247,7 @@ obj-$(CONFIG_REALLY_VIRTFS) += 9pfs/virtio-9p-device.o
 obj-$(CONFIG_KVM) += kvm.o kvm-all.o
 obj-$(CONFIG_NO_KVM) += kvm-stub.o
 obj-y += memory.o
-LIBS+=-lz
+LIBS+=-lz -lprotobuf-c -lprotobuf 
 
 QEMU_CFLAGS += $(VNC_TLS_CFLAGS)
 QEMU_CFLAGS += $(VNC_SASL_CFLAGS)
@@ -564,11 +566,7 @@ clean:
 	rm -f *.o *.a *~ $(PROGS) nwfpe/*.o fpu/*.o
 	rm -f *.d */*.d tcg/*.o ide/*.o 9pfs/*.o panda/*.o *.bc *.bc1 *.bc2
 	rm -f hmp-commands.h qmp-commands-old.h gdbstub-xml.c
-	rm -f panda_plugins/DroidScope/DS_utils/*.*
-	rm -f panda_plugins/DroidScope/linuxAPI/*.*
-	rm -f panda_plugins/DroidScope/*.*
-	rm -f panda_plugins/utils/*.*
-	rm -f panda_plugins/*.* panda_tools/*
+	find panda_plugins -depth -mindepth 1 -delete
 
 ifdef CONFIG_TRACE_SYSTEMTAP
 	rm -f *.stp

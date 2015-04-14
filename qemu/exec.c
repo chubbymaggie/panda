@@ -1832,9 +1832,9 @@ const CPULogItem cpu_log_items[] = {
       "show generated LLVM IR code" },
     { CPU_LOG_LLVM_ASM, "llvm_asm",
       "show LLVM-generated assembly code" },
-#endif
     { CPU_LOG_TAINT_OPS, "taint_ops",
       "show taint ops for each llvm bb", },
+#endif
     { 0, NULL, NULL },
 };
 
@@ -4185,7 +4185,7 @@ static int cpu_physical_memory_rw_ex(target_phys_addr_t addr, uint8_t *buf,
                 if (rr_mode == RR_REPLAY) {
                     // run all callbacks registered for cpu_physical_memory_rw ram case
                     panda_cb_list *plist;
-                    for (plist = panda_cbs[PANDA_CB_REPLAY_BEFORE_CPU_PHYSICAL_MEM_RW_RAM]; plist != NULL; plist = plist->next) {
+                    for (plist = panda_cbs[PANDA_CB_REPLAY_BEFORE_CPU_PHYSICAL_MEM_RW_RAM]; plist != NULL; plist = panda_cb_list_next(plist)) {
                         plist->entry.replay_before_cpu_physical_mem_rw_ram(cpu_single_env, is_write, buf, addr1, l);
                     }
                 }
@@ -4254,7 +4254,7 @@ static int cpu_physical_memory_rw_ex(target_phys_addr_t addr, uint8_t *buf,
                 if (rr_mode == RR_REPLAY) {
                     // run all callbacks registered for cpu_physical_memory_rw ram case
                     panda_cb_list *plist;
-                    for (plist = panda_cbs[PANDA_CB_REPLAY_BEFORE_CPU_PHYSICAL_MEM_RW_RAM]; plist != NULL; plist = plist->next) {
+                    for (plist = panda_cbs[PANDA_CB_REPLAY_BEFORE_CPU_PHYSICAL_MEM_RW_RAM]; plist != NULL; plist = panda_cb_list_next(plist)) {
                         plist->entry.replay_before_cpu_physical_mem_rw_ram(cpu_single_env, is_write, buf, addr1, l);
                     }
                 }
@@ -5013,6 +5013,8 @@ int cpu_memory_rw_debug(CPUState *env, target_ulong addr,
     return 0;
 }
 
+int cpu_memory_rw(CPUState *env, target_ulong addr,
+                  uint8_t *buf, int len, int is_write);
 /* virtual memory access for debug (includes writing to ROM) */
 int cpu_memory_rw(CPUState *env, target_ulong addr,
                   uint8_t *buf, int len, int is_write)

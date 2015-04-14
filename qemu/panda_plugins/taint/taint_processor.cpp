@@ -28,6 +28,8 @@ PANDAENDCOMMENT */
 
 #include "label_set.h"
 
+typedef struct LabelSet * LabelSetP;
+
 #define SB_INLINE inline
 
 #ifdef TAINTSTATS
@@ -41,6 +43,9 @@ uint8_t taintedfunc;
 
 // Global count of taint labels
 int count = 0;
+
+// Global count of taint labels, primarily used in file labeling tool
+int taint_pos_count = 0;
 
 int tainted_pointer = 1;
 
@@ -77,6 +82,7 @@ PPP_PROT_REG_CB(on_store);
 PPP_PROT_REG_CB(on_branch);
 PPP_PROT_REG_CB(before_execute_taint_ops);
 PPP_PROT_REG_CB(after_execute_taint_ops);
+PPP_PROT_REG_CB(on_tainted_instruction);
 
 
 // this adds the actual callback machinery including
@@ -86,6 +92,7 @@ PPP_CB_BOILERPLATE(on_store);
 PPP_CB_BOILERPLATE(on_branch);
 PPP_CB_BOILERPLATE(before_execute_taint_ops);
 PPP_CB_BOILERPLATE(after_execute_taint_ops);
+PPP_CB_BOILERPLATE(on_tainted_instruction);
 }
 
 void tp_ls_iter(Shad *shad, Addr *a, int (*app)(uint32_t el, void *stuff1), void *stuff2);
@@ -128,9 +135,20 @@ Addr make_paddr(uint64_t a) {
   return pa;
 }
 
+
+Addr make_laddr(uint64_t a, uint64_t o) {
+    Addr la;
+    la.typ = LADDR;
+    la.val.la = a;
+    la.off = o;
+    la.flag = (AddrFlag) 0;
+    return la;
+}
+
+
 // if addr is one of HAddr, MAddr, IAddr, PAddr, LAddr, then add this offset to it
 // else throw up
-static Addr addr_add(Addr a, uint32_t o) {
+__attribute__((unused)) static Addr addr_add(Addr a, uint32_t o) {
   switch (a.typ) {
   case HADDR:
     a.val.ha += o;
@@ -199,7 +217,7 @@ static SB_INLINE void clear_ram_bit(Shad *shad, uint32_t addr) {
     shad->ram_bitmap[addr >> 3] = taint_byte;
 }
 
-// Apply taint to a buffer of memory
+// Apply taint to a buffer of memory according to taint_label_mode
 void add_taint_ram(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
         uint64_t addr, int length){
     struct addr_struct a = {};
@@ -232,7 +250,62 @@ void add_taint_ram(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
     count += length;
 }
 
-// Apply taint to a buffer of IO memory
+// Apply positional taint to a buffer of memory
+void add_taint_ram_pos(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
+        uint64_t addr, int length){
+    struct addr_struct a = {};
+    a.typ = MADDR;
+    struct taint_op_struct op = {};
+    op.typ = LABELOP;
+    for (int i = 0; i < length; i++){
+#ifdef CONFIG_SOFTMMU
+        target_phys_addr_t pa = cpu_get_phys_addr(env, addr + i);
+        if (pa == (target_phys_addr_t)(-1)) {
+            printf("can't label addr=0x%lx: mmu hasn't mapped virt->phys, i.e., it isnt actually there.\n", addr +i);
+            continue;
+        }
+        assert (pa != -1);
+        a.val.ma = pa;
+#else
+        a.val.ma = addr + i;
+#endif // CONFIG_SOFTMMU
+        op.val.label.a = a;
+        op.val.label.l = i + taint_pos_count;
+        tob_op_write(tbuf, &op);	
+    }
+    assert (tbuf->ptr <= (tbuf->start + tbuf->max_size));
+    tob_process(tbuf, shad, NULL);
+    taint_pos_count += length;
+}
+
+// Apply single label taint to a buffer of memory
+void add_taint_ram_single_label(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
+        uint64_t addr, int length, long label){
+    struct addr_struct a = {};
+    a.typ = MADDR;
+    struct taint_op_struct op = {};
+    op.typ = LABELOP;
+    for (int i = 0; i < length; i++){
+#ifdef CONFIG_SOFTMMU
+        target_phys_addr_t pa = cpu_get_phys_addr(env, addr + i);
+        if (pa == (target_phys_addr_t)(-1)) {
+            printf("can't label addr=0x%lx: mmu hasn't mapped virt->phys, i.e., it isnt actually there.\n", addr +i);
+            continue;
+        }
+        assert (pa != -1);
+        a.val.ma = pa;
+#else
+        a.val.ma = addr + i;
+#endif // CONFIG_SOFTMMU
+        op.val.label.a = a;
+        op.val.label.l = label;
+        tob_op_write(tbuf, &op);	
+    }
+    assert (tbuf->ptr <= (tbuf->start + tbuf->max_size));
+    tob_process(tbuf, shad, NULL);
+}
+
+// Apply taint to a buffer of IO memory according to taint_label_mode
 void add_taint_io(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
         uint64_t addr, int length){
     Addr a = make_iaddr(addr);
@@ -515,12 +588,16 @@ uint32_t tp_query_llvm(Shad *shad, int reg_num, int offset) {
 }
 
 
+void tp_ls_iter(LabelSet *ls,  int (*app)(uint32_t el, void *stuff1), void *stuff2) {
+    if (!labelset_is_empty(ls)) {
+        labelset_iter(ls, app, stuff2);
+    }
+}
+
 //SB_INLINE void tp_ls_iter(Shad *shad, Addr *a, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
-void tp_ls_iter(Shad *shad, Addr *a, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
-  LabelSet *ls = tp_labelset_get(shad, a);
-  if (!labelset_is_empty(ls)) {
-    labelset_iter(ls, app, stuff2);
-  }
+void tp_lsa_iter(Shad *shad, Addr *a, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
+  LabelSetP ls = tp_labelset_get(shad, a);
+  tp_ls_iter(ls, app, stuff2);
 }
 
 void tp_ls_ram_iter(Shad *shad, uint64_t pa, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
@@ -529,7 +606,7 @@ void tp_ls_ram_iter(Shad *shad, uint64_t pa, int (*app)(uint32_t el, void *stuff
   ra.val.ma = pa;
   ra.off = 0;
   ra.flag = (AddrFlag) 0;
-  tp_ls_iter(shad, &ra, app, stuff2);
+  tp_lsa_iter(shad, &ra, app, stuff2);
 }
 
 
@@ -539,7 +616,7 @@ void tp_ls_reg_iter(Shad *shad, int reg_num, int offset, int (*app)(uint32_t el,
   ra.val.gr = reg_num;
   ra.off = offset;
   ra.flag = (AddrFlag) 0;
-  tp_ls_iter(shad, &ra, app, stuff2);
+  tp_lsa_iter(shad, &ra, app, stuff2);
 }
 
 void tp_ls_llvm_iter(Shad *shad, int reg_num, int offset, int (*app)(uint32_t el, void *stuff1), void *stuff2) {
@@ -548,7 +625,7 @@ void tp_ls_llvm_iter(Shad *shad, int reg_num, int offset, int (*app)(uint32_t el
   ra.val.la = reg_num;
   ra.off = offset;
   ra.flag = (AddrFlag) 0;
-  tp_ls_iter(shad, &ra, app, stuff2);
+  tp_lsa_iter(shad, &ra, app, stuff2);
 }
 
 struct reg_spit_info {
@@ -1526,7 +1603,7 @@ void tob_op_read(TaintOpBuffer *buf, TaintOp **aop) {
 }
 
 
-SB_INLINE void process_insn_start_op(TaintOp *op, TaintOpBuffer *buf,
+SB_INLINE void process_insn_start_op(Shad *shad,  TaintOp *op, TaintOpBuffer *buf,
         DynValBuffer *dynval_buf){
 #ifdef TAINTDEBUG
     printf("Fixing up taint op buffer for: %s\n", op->val.insn_start.name);
@@ -1939,8 +2016,9 @@ SB_INLINE void process_insn_start_op(TaintOp *op, TaintOpBuffer *buf,
             int reg_num = op->val.insn_start.branch_cond_llvm_reg;
             bool conditional_branch = reg_num != -1;
             if (conditional_branch) {
-                    PPP_RUN_CB(on_branch, reg_num);
+                PPP_RUN_CB(on_branch, shad->pc, reg_num);
             }
+
 
             /*
              * End place to inspect taint on branch condition
@@ -2488,6 +2566,8 @@ void tob_process(TaintOpBuffer *buf, Shad *shad, DynValBuffer *dynval_buf) {
                     if (tainted_instructions && shad->taint_state_changed) {
                         // add last pc to set of pcs that changed taint state
                         shad->tpc[shad->asid].insert(shad->pc);
+                        // run PPP callbacks
+                        PPP_RUN_CB(on_tainted_instruction, shad);
                     }
 
                     // set taint processor's pc to correct value for
@@ -2505,7 +2585,7 @@ void tob_process(TaintOpBuffer *buf, Shad *shad, DynValBuffer *dynval_buf) {
 
             case INSNSTARTOP:
                 {
-		  process_insn_start_op(op, buf, dynval_buf);
+                    process_insn_start_op(shad, op, buf, dynval_buf);
                     if (next_step == EXCEPT){
                         return;
                     }

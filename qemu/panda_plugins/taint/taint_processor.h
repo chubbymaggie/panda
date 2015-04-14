@@ -198,6 +198,9 @@ void tp_ls_reg_iter(Shad *shad, int reg_num, int offset, int (*app)(uint32_t el,
 
 void tp_ls_llvm_iter(Shad *shad, int reg_num, int offset, int (*app)(uint32_t el, void *stuff1), void *stuff2) ;
 
+void tp_ls_iter(LabelSet *ls,  int (*app)(uint32_t el, void *stuff1), void *stuff2) ;
+
+
 // returns number of tainted addrs in ram
 uint32_t tp_occ_ram(Shad *shad);
 
@@ -347,10 +350,10 @@ typedef void (*tp_callback_t) (uint64_t tp_pc, uint64_t addr);
 
 typedef void (*on_load_t) (uint64_t tp_pc, uint64_t addr);
 typedef void (*on_store_t) (uint64_t tp_pc, uint64_t addr);
-typedef void (*on_branch_t) (int reg_num);
+typedef void (*on_branch_t) (uint64_t pc, int reg_num);
 typedef void (*before_execute_taint_ops_t) (void);
 typedef void (*after_execute_taint_ops_t) (void);
-
+typedef void (*on_tainted_instruction_t) (Shad *shad);
 
 /*
 // scb will get called, inside the taint processor 
@@ -362,11 +365,19 @@ void tp_add_store_callback(tp_callback_t scb);
 void tp_add_load_callback(tp_callback_t lcb);
 */
 
-// Apply taint to a buffer of RAM
+// Apply taint to a buffer of memory according to taint_label_mode
 void add_taint_ram(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
         uint64_t addr, int length);
 
-// Apply taint to a buffer of IO memory
+// Apply positional taint to a buffer of RAM
+void add_taint_ram_pos(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
+        uint64_t addr, int length);
+
+// Apply a single label of taint to a buffer of RAM
+void add_taint_ram_single_label(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
+        uint64_t addr, int length, long label);
+
+// Apply taint to a buffer of IO memory according to taint_label_mode
 void add_taint_io(CPUState *env, Shad *shad, TaintOpBuffer *tbuf,
         uint64_t addr, int length);
 

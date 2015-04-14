@@ -513,7 +513,11 @@ struct _panda_cb_list {
     void *owner;
     panda_cb_list *next;
     panda_cb_list *prev;
+    bool enabled;
 };
+panda_cb_list* panda_cb_list_next(panda_cb_list* plist);
+void panda_enable_plugin(void *plugin);
+void panda_disable_plugin(void *plugin);
 
 // Structure to store metadata about a plugin
 typedef struct panda_plugin {
@@ -527,7 +531,8 @@ bool   panda_load_plugin(const char *filename);
 bool   panda_add_arg(const char *arg, int arglen);
 void * panda_get_plugin_by_name(const char *name);
 void   panda_do_unload_plugin(int index);
-void   panda_unload_plugin(int index);
+void   panda_unload_plugin(void* plugin);
+void   panda_unload_plugin_idx(int idx);
 void   panda_unload_plugins(void);
 
 // Doesn't exist in user mode
@@ -589,5 +594,9 @@ double panda_parse_double(panda_arg_list *args, const char *argname, double defv
 // Returns true if arg present, unless arg=false or arg=no exists.
 bool panda_parse_bool(panda_arg_list *args, const char *argname);
 const char *panda_parse_string(panda_arg_list *args, const char *argname, const char *defval);
+char** str_split(char* a_str, const char a_delim);
+
+char *panda_plugin_path(const char *name);
+void panda_require(const char *plugin_name);
 
 #endif
