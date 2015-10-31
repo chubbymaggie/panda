@@ -22,7 +22,7 @@ tstringsearch
 #network
 scissors
 taint_compute_numbers
-#bir
+bir
 replaymovie
 useafterfree
 bufmon
@@ -34,11 +34,17 @@ tainted_branch
 osi
 osi_linux
 osi_test
+osi_winxpsp3x86
 win7x86intro
 memstrings
 asidstory
 file_taint
 win7proc
 ida_taint
+ida_taint2
 tainted_instr
 pmemaccess
+#code_provenance
+#net_taint
+rehosting
+coverage

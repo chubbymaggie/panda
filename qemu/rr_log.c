@@ -116,7 +116,7 @@ static RR_log_entry *rr_queue_tail;
 //mz Other useful things
 //
 //mz from vl.c
-extern void log_all_cpu_states(void);
+//extern void log_all_cpu_states(void);
 
 /******************************************************************************************/
 /* UTILITIES */
@@ -1298,6 +1298,8 @@ void rr_destroy_log(void) {
 
 struct timeval replay_start_time;
 
+uint8_t spit_out_total_num_instr_once = 0;
+
 //mz display a measure of replay progress (using instruction counts and log size)
 void replay_progress(void) {
   if (rr_nondet_log) {
@@ -1310,7 +1312,8 @@ void replay_progress(void) {
 
         struct timeval *time = &rusage.ru_utime;
         float secs = ((float)time->tv_sec*1000000 + (float)time->tv_usec) / 1000000.0;
-        char *name = basename(rr_nondet_log->name);
+        char *dup_name = strdup(rr_nondet_log->name);
+        char *name = basename(dup_name);
         char *dot = strrchr(name, '.');
         if (dot && dot - name > 10) *(dot - 10) = '\0';
         printf("%s:  %10lu (%6.2f%%) instrs. %7.2f sec. %5.2f GB ram.\n",
@@ -1319,7 +1322,13 @@ void replay_progress(void) {
                 ((rr_get_guest_instr_count() * 100.0) / 
                  rr_nondet_log->last_prog_point.guest_instr_count),
                 secs, rusage.ru_maxrss / 1024.0 / 1024.0);
-     }
+        free(dup_name);
+        if (!spit_out_total_num_instr_once) {
+            spit_out_total_num_instr_once = 1;
+            printf("total_instr in replay: %10lu\n", rr_nondet_log->last_prog_point.guest_instr_count);
+        }
+
+    }
   }
 }
 
@@ -1479,7 +1488,7 @@ int rr_do_begin_record(const char *file_name_full, void *cpu_state) {
     rr_get_snapshot_file_name(rr_name, rr_path, name_buf, sizeof(name_buf));
     printf ("writing snapshot:\t%s\n", name_buf);
     snapshot_ret = do_savevm_rr(get_monitor(), name_buf);
-    log_all_cpu_states();
+    //log_all_cpu_states();
   }
 
   // save the time so we can report how long record takes
@@ -1520,7 +1529,7 @@ void rr_do_end_record(void) {
   time(&rr_end_time);
   printf("Time taken was: %ld seconds.\n", rr_end_time - rr_start_time);
   
-  log_all_cpu_states();
+  //log_all_cpu_states();
 
   rr_destroy_log();
 
@@ -1569,7 +1578,7 @@ int rr_do_begin_replay(const char *file_name_full, void *cpu_state) {
       return snapshot_ret;
   }*/
   printf ("... done.\n");
-  log_all_cpu_states();
+  //log_all_cpu_states();
 
   // save the time so we can report how long replay takes
   time(&rr_start_time);
@@ -1603,7 +1612,7 @@ void rr_do_end_replay(int is_error) {
         printf ("ERROR: replay failed!\n");
     }
     else {
-        printf ("Replay completed successfully.\n");
+        printf ("Replay completed successfully. 1\n");
     }
 
     time_t rr_end_time;
@@ -1634,7 +1643,7 @@ void rr_do_end_replay(int is_error) {
     }
     //mz some more sanity checks - the queue should contain only the RR_LAST element
     if (rr_queue_head == rr_queue_tail && rr_queue_head != NULL && rr_queue_head->header.kind == RR_LAST) {
-        printf("Replay completed successfully.");
+        printf("Replay completed successfully 2.\n");
     }
     else {
         if (is_error) {
@@ -1658,7 +1667,7 @@ void rr_do_end_replay(int is_error) {
     rr_queue_head = NULL;
     rr_queue_tail = NULL;
     //mz print CPU state at end of replay
-    log_all_cpu_states();
+    //log_all_cpu_states();
     // close logs
     rr_destroy_log();
     // turn off replay

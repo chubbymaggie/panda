@@ -28,10 +28,11 @@ PANDAENDCOMMENT */
 #include "fast_shad.h"
 
 #include <set>
+#include <string>
 
 typedef const std::set<uint32_t> *LabelSetP;
 
-FastShad::FastShad(uint64_t labelsets) {
+FastShad::FastShad(std::string name, uint64_t labelsets) : _name(name) {
     uint64_t bytes = sizeof(TaintData) * labelsets;
 
     TaintData *array;
@@ -42,24 +43,16 @@ FastShad::FastShad(uint64_t labelsets) {
         assert(array);
         memset(array, 0, bytes);
     } else {
-        uint64_t align = 1UL << 40; // Align to a 1T boundary.
-        assert(align > bytes);
-        uint64_t vaddr = 0;
-        do {
-            // We're going to try to make this aligned.
-            vaddr += align;
-            printf("taint2: Allocating large fast_shad (%lu bytes)  @ 0x%" PRIx64 ".\n",
-                    bytes, vaddr);
-            array = (TaintData *)mmap((void *)vaddr, bytes, PROT_READ | PROT_WRITE,
-                    MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED | MAP_HUGETLB,
-                    -1, 0);
-            if (array == (TaintData *)MAP_FAILED) {
-                printf("taint2: Hugetlb failed. Trying without.\n");
-                // try without HUGETLB
-                array = (TaintData *)mmap((void *)vaddr, bytes, PROT_READ | PROT_WRITE,
-                        MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0);
-            }
-        } while (array == (TaintData *)MAP_FAILED && vaddr <= align * 8); // only try 8 times.
+        printf("taint2: Allocating large fast_shad (%lu bytes).\n", bytes);
+        array = (TaintData *)mmap(NULL, bytes, PROT_READ | PROT_WRITE,
+                MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB,
+                -1, 0);
+        if (array == (TaintData *)MAP_FAILED) {
+            printf("taint2: Hugetlb failed. Trying without.\n");
+            // try without HUGETLB
+            array = (TaintData *)mmap(NULL, bytes, PROT_READ | PROT_WRITE,
+                    MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+        }
         if (array == (TaintData *)MAP_FAILED) {
             puts(strerror(errno));
         }

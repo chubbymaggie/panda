@@ -1,4 +1,8 @@
 # Compiling PANDA
+
+WARNING: This document is slightly out of date. Look at
+[panda_install.bash](../panda_install.bash) instead.
+
 In order to build PANDA, you should use the `build.sh` script
 in the QEMU directory. The script comes with some default
 options. But first, the prerequisites need to be taken care of.
@@ -27,7 +31,7 @@ sudo apt-get install build-essential
 sudo apt-get build-dep qemu
 sudo apt-get install nasm
 sudo apt-get install libssl-dev
-sudo apt-get install libpacap-dev
+sudo apt-get install libpcap-dev
 sudo apt-get install subversion
 sudo apt-get -y install curl
 sudo apt-get -y install autoconf
@@ -54,6 +58,21 @@ cd llvm/tools/clang/tools
 svn checkout http://llvm.org/svn/llvm-project/clang-tools-extra/tags/RELEASE_33/final/ extra
 cd -
 ```
+
+<!-- Note: Maybe the patch should be copied inside the PANDA repository, or in a gist. -->
+
+If you are working with g++-4.9, you will also need to
+[patch clang](http://reviews.llvm.org/rL201729) to provide `max_align_t`.
+Otherwise building of some plugins will fail.
+
+```
+export CLANG_PATCH=http://reviews.llvm.org/file/data/sw37fgtbupwhetydgazl/PHID-FILE-wprxzvc5yn4ylp7xwt6t/201729.diff
+cd llvm/tools/clang
+wget -O - "$CLANG_PATCH" | patch -p2 -F3
+unset CLANG_PATCH
+cd -
+```
+
 
 Now, compile LLVM. For a **debug build** (REALLY slow), use the following command:
 
